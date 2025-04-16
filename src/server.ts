@@ -1,5 +1,6 @@
 import { routeAgentRequest, type Schedule } from "agents";
-
+import { Hono } from "hono";
+import { agentsMiddleware } from "hono-agents";
 import { unstable_getSchedulePrompt } from "agents/schedule";
 
 import { AIChatAgent } from "agents/ai-chat-agent";
@@ -90,25 +91,27 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
 /**
  * Worker entry point that routes incoming requests to the appropriate handler
  */
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    const url = new URL(request.url);
-
-    if (url.pathname === "/check-open-ai-key") {
-      const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
-      return Response.json({
-        success: hasOpenAIKey,
-      });
-    }
+const app = new Hono()
+  .get("/check-open-ai-key", (c) => {
+    const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
+    return c.json({ success: hasOpenAIKey });
+  })
+  .use("*", (c, next) => {
     if (!process.env.OPENAI_API_KEY) {
       console.error(
         "OPENAI_API_KEY is not set, don't forget to set it locally in .dev.vars, and use `wrangler secret bulk .dev.vars` to upload it to production"
       );
     }
-    return (
-      // Route the request to our agent or return 404 if not found
-      (await routeAgentRequest(request, env)) ||
-      new Response("Not found", { status: 404 })
-    );
-  },
-} satisfies ExportedHandler<Env>;
+    return next();
+  })
+  .use(
+    "*",
+    agentsMiddleware({
+      options: {
+        onBeforeRequest: async (req) => {
+          return new Response("Unauthorized", { status: 401 });
+        },
+      },
+    })
+  );
+export default app;
